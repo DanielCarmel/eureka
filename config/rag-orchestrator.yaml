@@ -1,0 +1,32 @@
+# RAG Orchestrator Configuration
+
+# External service URLs
+services:
+  llm_engine_url: "http://llm-engine:8080"
+  mcp_server_url: "http://mcp-server:5001"
+  vector_db_url: "http://vector-db:8000"
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8000
+  api_key: ""  # Set to empty string to disable authentication
+
+# Default RAG settings
+rag:
+  max_context_chunks: 5
+  default_collection_name: "documents"
+  include_sources: true
+
+# LLM query settings
+llm:
+  max_tokens: 512
+  temperature: 0.7
+  top_p: 0.95
+
+# Logging configuration
+logging:
+  level: "INFO"
+  file: "logs/rag-orchestrator.log"
+  max_size_mb: 10
+  backup_count: 5

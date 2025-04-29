@@ -1,0 +1,89 @@
+version: '3.8'
+
+services:
+  # LLM Engine for local inference
+  llm-engine:
+    build: ./llm-engine
+    container_name: eureka-llm-engine
+    restart: unless-stopped
+    volumes:
+      - ./models:/app/models
+      - ./llm-engine/logs:/app/logs
+    ports:
+      - "8080:8080"
+    environment:
+      - MODEL_PATH=/app/models/${LLM_MODEL_FILE:-llama-3-8b-instruct.Q4_K_M.gguf}
+      - MODEL_TYPE=${LLM_MODEL_TYPE:-llama}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES:-0}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  # MCP Server for corporate data sources
+  mcp-server:
+    build: ./mcp-server
+    container_name: eureka-mcp-server
+    restart: unless-stopped
+    depends_on:
+      - llm-engine
+    volumes:
+      - ./mcp-server/logs:/app/logs
+    ports:
+      - "5001:5001"
+    environment:
+      - JIRA_URL=${JIRA_URL}
+      - JIRA_USERNAME=${JIRA_USERNAME}
+      - JIRA_TOKEN=${JIRA_TOKEN}
+      - CONFLUENCE_URL=${CONFLUENCE_URL}
+      - CONFLUENCE_USERNAME=${CONFLUENCE_USERNAME}
+      - CONFLUENCE_TOKEN=${CONFLUENCE_TOKEN}
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-us-east-1}
+      - AWS_S3_ENDPOINT_URL=${AWS_S3_ENDPOINT_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+  # Vector DB for document embeddings
+  vector-db:
+    build: ./vector-db
+    container_name: eureka-vector-db
+    restart: unless-stopped
+    volumes:
+      - ./vector-db/data:/app/data
+      - ./vector-db/logs:/app/logs
+    ports:
+      - "8000:8000"
+    environment:
+      - CHROMA_DB_PATH=/app/data
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-all-MiniLM-L6-v2}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+  # RAG Orchestrator
+  rag-orchestrator:
+    build: ./rag-orchestrator
+    container_name: eureka-rag-orchestrator
+    restart: unless-stopped
+    depends_on:
+      - llm-engine
+      - mcp-server
+      - vector-db
+    volumes:
+      - ./rag-orchestrator/logs:/app/logs
+    ports:
+      - "8888:8000"
+    environment:
+      - LLM_ENGINE_URL=http://llm-engine:8080
+      - MCP_SERVER_URL=http://mcp-server:5001
+      - VECTOR_DB_URL=http://vector-db:8000
+      - API_KEY=${API_KEY}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+networks:
+  default:
+    name: eureka-network
+    driver: bridge

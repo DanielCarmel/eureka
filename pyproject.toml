@@ -1,0 +1,114 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eureka"
+version = "0.1.0"
+description = "Enterprise RAG System"
+requires-python = ">=3.9"  # Updated to be compatible with numpy 1.26.0
+license = "MIT"  # Changed to string format to fix deprecation warning
+readme = "README.md"
+authors = [
+    {name = "Eureka Team"},
+]
+dependencies = [
+    # Common dependencies
+    "fastapi==0.103.1",
+    "uvicorn==0.23.2",
+    "pydantic==2.3.0",
+    "python-dotenv==1.0.0",
+    "loguru==0.7.0",
+    "httpx==0.25.0",
+    "requests==2.31.0",
+    "python-multipart==0.0.6",
+    
+    # LLM Engine dependencies
+    "ctransformers==0.2.27",
+    "openai==0.28.0",
+    "transformers==4.34.0",
+    "sentencepiece==0.1.99",
+    "torch>=2.1.0",  # Updated to a version compatible with Python 3.12
+    "peft==0.5.0",
+    "accelerate==0.23.0",
+    "bitsandbytes==0.41.1",
+    
+    # Vector DB dependencies
+    "chromadb==0.4.15",
+    "sentence-transformers==2.2.2",
+    "numpy>=1.26.0",  # Updated to a version compatible with Python 3.12
+    "tqdm==4.66.1",
+    
+    # MCP Server dependencies
+    "atlassian-python-api==3.41.1",
+    "boto3==1.28.53",
+    "jsonrpcserver==5.0.9",
+    "markdown==3.5",
+    "bs4==0.0.1",
+    "PyPDF2==3.0.1",
+    "python-docx==0.8.11",
+    
+    # RAG Orchestrator dependencies
+    "jinja2==3.1.2",
+    "aiohttp>=3.9.0",  # Updated to a version compatible with Python 3.12
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "black>=23.0.0",
+    "isort>=5.12.0",
+    "flake8>=6.0.0",
+    "mypy>=1.0.0",
+    "pre-commit>=3.0.0",
+]
+
+[tool.setuptools]
+# Remove src-layout configuration
+packages = ["cli", "config", "models", "llm-engine", "mcp-server", "rag-orchestrator", "vector-db"]
+
+[tool.black]
+line-length = 88
+target-version = ["py38", "py39", "py310", "py311", "py312"]
+include = '\.pyi?$'
+
+[tool.isort]
+profile = "black"
+line_length = 88
+multi_line_output = 3
+
+[tool.mypy]
+python_version = "3.8"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+strict_optional = true
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+python_files = "test_*.py"
+
+[tool.ruff]
+line-length = 88
+target-version = "py312"  # Updated to Python 3.12
+select = [
+    "E",  # pycodestyle errors
+    "F",  # pyflakes
+    "I",  # isort
+    "C",  # flake8-comprehensions
+    "B",  # flake8-bugbear
+]
+ignore = [
+    "E203",  # whitespace before ':'
+]
+
+[tool.uv]
+# Configure uv as the dependency manager
+python = {version = ">=3.8.1"}
+required-version = ">=0.1.0"

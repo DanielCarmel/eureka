@@ -1,0 +1,21 @@
+# Vector Database Configuration
+
+# Database storage path
+chroma_db_path: "/app/data"
+
+# Embedding model configuration
+embedding:
+  model: "all-MiniLM-L6-v2"
+  dimension: 384
+
+# Server configuration
+server:
+  host: "0.0.0.0"
+  port: 8000
+
+# Logging configuration
+logging:
+  level: "INFO"
+  file: "logs/vector-db.log"
+  max_size_mb: 10
+  backup_count: 5

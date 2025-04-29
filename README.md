@@ -57,7 +57,7 @@ Eureka consists of several microservices:
 - Docker and Docker Compose
 - 16GB+ RAM (varies based on LLM model size)
 - GPU recommended but not required
-- Python 3.8+ for CLI tools
+- Python 3.9+ for CLI tools
 
 ## Installation
 

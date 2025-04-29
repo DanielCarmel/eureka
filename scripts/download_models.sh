@@ -18,7 +18,7 @@ echo ""
 download_file() {
     URL=$1
     OUTPUT=$2
-    
+
     if command -v wget > /dev/null; then
         wget --progress=bar:force -O "$OUTPUT" "$URL"
     elif command -v curl > /dev/null; then

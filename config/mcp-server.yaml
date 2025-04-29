@@ -16,14 +16,14 @@ connectors:
       - "title"
       - "description"
       - "comments"
-    
+
   confluence:
     url: "https://your-confluence-instance.atlassian.net"
     username: "your-username@example.com"
     token: ""
     max_results: 10
     spaces: []  # Leave empty to search all spaces
-    
+
   s3:
     aws_access_key_id: ""
     aws_secret_access_key: ""

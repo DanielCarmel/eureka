@@ -1,6 +1,5 @@
 import logging
 import os
-import sys
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional
 
@@ -49,6 +48,8 @@ chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
 # Try to load the sentence transformer model with offline support
 embedding_model = None
+
+
 def load_embedding_model():
     global embedding_model
     try:
@@ -60,31 +61,33 @@ def load_embedding_model():
             logger.info("Embedding model loaded successfully from cache")
         except Exception as cache_error:
             logger.warning(f"Could not load model from cache: {cache_error}")
-            
+
             # Try downloading the model with a timeout
             try:
                 import socket
                 # Set a shorter timeout for DNS resolution and connections
                 default_timeout = socket.getdefaulttimeout()
                 socket.setdefaulttimeout(10)  # 10 seconds timeout
-                
+
                 embedding_model = SentenceTransformer(EMBEDDING_MODEL, cache_folder=MODEL_CACHE_DIR)
                 logger.info("Embedding model downloaded and loaded successfully")
-                
+
                 # Restore default timeout
                 socket.setdefaulttimeout(default_timeout)
             except Exception as download_error:
                 logger.error(f"Failed to download model: {download_error}")
                 raise download_error
-        
+
         return True
     except Exception as e:
         logger.error(f"Failed to load embedding model: {e}")
         return False
 
+
 # Try to load the model
 if not load_embedding_model():
     logger.warning("Will try to run with disabled embedding features")
+
 
 # Define API models
 class Document(BaseModel):
@@ -125,7 +128,8 @@ def generate_embeddings(texts: List[str]) -> List[List[float]]:
     if not embedding_model:
         # If embedding model is not available, try to load it one more time
         if not load_embedding_model():
-            raise Exception("Embedding model is not available. Please ensure network connectivity to huggingface.co or provide a local model.")
+            raise Exception("Embedding model is not available. Please ensure network connectivity to huggingface.co \
+                            or provide a local model.")
 
     embeddings = embedding_model.encode(texts)
     return embeddings.tolist()
@@ -265,13 +269,13 @@ async def health_check():
 
         # Check if embedding model is loaded
         status = {"status": "healthy", "components": {}}
-        
+
         # Add ChromaDB status
         status["components"]["chromadb"] = {
             "status": "healthy",
             "path": CHROMA_DB_PATH
         }
-        
+
         # Add embedding model status
         if not embedding_model:
             status["status"] = "degraded"
@@ -287,13 +291,13 @@ async def health_check():
                 "model": EMBEDDING_MODEL,
                 "cache_dir": MODEL_CACHE_DIR
             }
-            
+
         return status
 
     except Exception as e:
         logger.error(f"Health check failed: {e}")
         return {
-            "status": "unhealthy", 
+            "status": "unhealthy",
             "reason": str(e),
             "components": {
                 "chromadb": {"status": "error", "reason": str(e)}

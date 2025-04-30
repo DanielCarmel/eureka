@@ -140,16 +140,29 @@ class S3Connector(BaseConnector):
         In a production environment, you might want to integrate with a proper search service.
         """
         if not self.client:
-            logger.error("S3 client not initialized")
+            logger.error("S3 client not initialized - check AWS credentials")
             return []
 
         results = []
 
         try:
+            # Log credentials state (without exposing sensitive data)
+            logger.info(
+                f"Attempting S3 query with region: {self.region_name}, "
+                f"endpoint: {self.endpoint_url or 'default AWS'}, "
+                f"access key provided: {bool(self.aws_access_key_id)}, "
+                f"secret key provided: {bool(self.aws_secret_access_key)}"
+            )
+
             # List all buckets
+            logger.info("Attempting to list S3 buckets")
             response = self.client.list_buckets()
 
-            for bucket in response["Buckets"]:
+            # Log success
+            bucket_count = len(response.get("Buckets", []))
+            logger.info(f"Successfully listed {bucket_count} S3 buckets")
+
+            for bucket in response.get("Buckets", []):
                 bucket_name = bucket["Name"]
 
                 try:
@@ -193,6 +206,12 @@ class S3Connector(BaseConnector):
 
         except Exception as e:
             logger.error(f"Error querying S3: {e}")
+            # Get more detailed diagnostic information
+            if hasattr(e, "response"):
+                status_code = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                error_code = e.response.get("Error", {}).get("Code")
+                error_msg = e.response.get("Error", {}).get("Message") 
+                logger.error(f"S3 Error Details - Status: {status_code}, Code: {error_code}, Message: {error_msg}")
             return []
 
     def get_document(self, document_id: str) -> Dict[str, Any]:
@@ -245,21 +264,55 @@ class S3Connector(BaseConnector):
         Check if S3 connection is healthy
         """
         if not self.client:
-            return {"healthy": False, "details": "S3 client not initialized"}
+            return {
+                "healthy": False, 
+                "details": "S3 client not initialized",
+                "credentials": {
+                    "aws_access_key_provided": bool(self.aws_access_key_id),
+                    "aws_secret_key_provided": bool(self.aws_secret_access_key),
+                    "region_provided": bool(self.region_name),
+                    "endpoint_url": self.endpoint_url or "default AWS"
+                }
+            }
 
         try:
             # Try to list buckets as a health check
+            logger.info("Performing S3 health check - listing buckets")
             response = self.client.list_buckets()
-            buckets = [bucket["Name"] for bucket in response["Buckets"]]
+            buckets = [bucket["Name"] for bucket in response.get("Buckets", [])]
 
             return {
                 "healthy": True,
                 "details": {
                     "bucket_count": len(buckets),
+                    "buckets": buckets[:10] if buckets else [],  # List up to 10 buckets
                     "region": self.region_name,
-                    "endpoint": self.endpoint_url or "default",
+                    "endpoint": self.endpoint_url or "default AWS",
+                    "credentials": {
+                        "aws_access_key_provided": bool(self.aws_access_key_id),
+                        "aws_secret_key_provided": bool(self.aws_secret_access_key)
+                    }
                 },
             }
         except Exception as e:
-            logger.error(f"S3 health check failed: {e}")
-            return {"healthy": False, "details": str(e)}
+            error_details = str(e)
+
+            # Try to extract more information from botocore exceptions
+            if hasattr(e, "response"):
+                status_code = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode")
+                error_code = e.response.get("Error", {}).get("Code")
+                error_msg = e.response.get("Error", {}).get("Message")
+                error_details = f"Status: {status_code}, Code: {error_code}, Message: {error_msg}"
+
+            logger.error(f"S3 health check failed: {error_details}")
+
+            return {
+                "healthy": False,
+                "details": error_details,
+                "credentials": {
+                    "aws_access_key_provided": bool(self.aws_access_key_id),
+                    "aws_secret_key_provided": bool(self.aws_secret_access_key),
+                    "region_provided": bool(self.region_name),
+                    "endpoint_url": self.endpoint_url or "default AWS"
+                }
+            }

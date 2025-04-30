@@ -239,7 +239,7 @@ async def query(request: QueryRequest, api_key: str = Security(get_api_key)):
                 "source_type": "mcp",
             }
             context_chunks.append(chunk)
-            context_text += f"\n\n[MCP DOCUMENT {i+1}]\nTitle: {chunk['title']}\nSource: {chunk['source']}\n{chunk['content']}"
+            context_text += f"\n\n[MCP DOCUMENT {i + 1}]\nTitle: {chunk['title']}\nSource: {chunk['source']}\n{chunk['content']}"
 
         # Format Vector DB results
         for i, result in enumerate(vector_results):
@@ -251,7 +251,7 @@ async def query(request: QueryRequest, api_key: str = Security(get_api_key)):
                 "source_type": "vector",
             }
             context_chunks.append(chunk)
-            context_text += f"\n\n[VECTOR DOCUMENT {i+1}]\nTitle: {chunk['title']}\nSource: {chunk['source']}\n{chunk['content']}"
+            context_text += f"\n\n[VECTOR DOCUMENT {i + 1}]\nTitle: {chunk['title']}\nSource: {chunk['source']}\n{chunk['content']}"
 
         # Step 4: Generate answer using LLM
         answer = await LLMService.generate_answer(request.question, context_text)
@@ -339,4 +339,4 @@ async def health_check():
 
 if __name__ == "__main__":
     logger.info("Starting RAG Orchestrator")
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, log_level="info")
+    uvicorn.run("main:app", host="0.0.0.0", port=8001, log_level="info")

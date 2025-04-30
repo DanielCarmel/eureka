@@ -5,6 +5,7 @@ from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional
 
 import jsonrpcserver
+from jsonrpcserver.result import Success
 import uvicorn
 
 # Import connectors
@@ -57,7 +58,7 @@ s3_connector = S3Connector(
     aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
     aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
     region_name=os.environ.get("AWS_DEFAULT_REGION"),
-    endpoint_url=os.environ.get("AWS_S3_ENDPOINT_URL"),
+    endpoint_url=os.environ.get("AWS_S3_ENDPOINT_URL")
 )
 
 # Register all connectors
@@ -111,10 +112,8 @@ def query_context(
     # Limit total results
     results = results[:max_results]
 
-    return {
-        "results": results,
-        "count": len(results),
-    }
+    # Return a proper jsonrpcserver.Success object
+    return Success({"results": results, "count": len(results)})
 
 
 @jsonrpcserver.method
@@ -126,7 +125,8 @@ def get_document(source: str, document_id: str) -> Dict[str, Any]:
         raise ValueError(f"Unknown source: {source}")
 
     document = connectors[source].get_document(document_id)
-    return {"document": document}
+    # Return a proper jsonrpcserver.Success object
+    return Success({"document": document})
 
 
 @jsonrpcserver.method
@@ -134,7 +134,8 @@ def list_sources() -> Dict[str, Any]:
     """
     List all available data sources
     """
-    return {"sources": list(connectors.keys())}
+    # Return a proper jsonrpcserver.Success object
+    return Success({"sources": list(connectors.keys())})
 
 
 @jsonrpcserver.method
@@ -156,7 +157,8 @@ def health() -> Dict[str, Any]:
             status[name] = {"healthy": False, "error": str(e)}
             all_healthy = False
 
-    return {"healthy": all_healthy, "status": status}
+    # Return a proper jsonrpcserver.Success object
+    return Success({"healthy": all_healthy, "status": status})
 
 
 # FastAPI endpoint that handles MCP requests

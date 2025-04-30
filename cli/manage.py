@@ -295,7 +295,7 @@ def handle_test_query(args):
         if "context_chunks" in response and response["context_chunks"]:
             print("\nSOURCES:")
             for i, chunk in enumerate(response["context_chunks"]):
-                print(f"\n{i+1}. {chunk['title']} ({chunk['source_type']})")
+                print(f"\n{i + 1}. {chunk['title']} ({chunk['source_type']})")
                 if "url" in chunk and chunk["url"]:
                     print(f"   URL: {chunk['url']}")
 

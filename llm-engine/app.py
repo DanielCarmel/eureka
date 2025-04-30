@@ -6,7 +6,6 @@ from typing import Any, Dict, List, Optional
 
 import torch
 import uvicorn
-from ctransformers import AutoModelForCausalLM as CTAutoModelForCausalLM
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -88,7 +87,10 @@ class ChatCompletionResponse(BaseModel):
 
 
 # Load model based on environment variables
-MODEL_PATH = os.environ.get("MODEL_PATH")
+
+# MODEL_PATH = os.environ.get("MODEL_PATH")
+MODEL_PATH = "models/llama-3-8b-instruct.Q4_K_M.gguf"
+
 MODEL_TYPE = os.environ.get("MODEL_TYPE", "llama")
 USE_GPU = torch.cuda.is_available()
 
@@ -99,23 +101,70 @@ if not MODEL_PATH or not os.path.exists(MODEL_PATH):
 logger.info(f"Loading model from {MODEL_PATH} with type {MODEL_TYPE}")
 logger.info(f"Using GPU: {USE_GPU}")
 
+# Enhanced GPU configuration
+if USE_GPU:
+    logger.info(f"GPU detected: {torch.cuda.get_device_name(0)}")
+    logger.info(f"GPU memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.2f} GB")
+    # Set stronger GPU memory efficiency settings
+    torch.cuda.empty_cache()
+    device_map = "auto"
+    torch_dtype = torch.float16  # Use FP16 for better GPU memory efficiency
+else:
+    device_map = None
+    torch_dtype = torch.float32
+
 # Initialize model based on format (GGUF, HF, etc.)
 if MODEL_PATH.endswith(".gguf"):
-    logger.info("Loading GGUF model with CTransformers")
-    model = CTAutoModelForCausalLM.from_pretrained(
-        MODEL_PATH, model_type=MODEL_TYPE, gpu_layers=64 if USE_GPU else 0
-    )
-    tokenizer = None
+    logger.info("Loading GGUF model with transformers")
+
+    # For GGUF models, we'll use llama-cpp-python through the transformers LlamaTokenizer
+    try:
+        from llama_cpp import Llama
+
+        # Initialize Llama with GPU support
+        n_gpu_layers = -1 if USE_GPU else 0  # -1 means use all available layers on GPU
+
+        # Load the model
+        llm = Llama(
+            model_path=MODEL_PATH,
+            n_gpu_layers=n_gpu_layers,
+            n_ctx=2048,
+        )
+
+        # Configure tokenizer for token counting
+        if MODEL_TYPE == "llama":
+            tokenizer = AutoTokenizer.from_pretrained("meta-llama/Llama-2-7b-hf")
+        elif MODEL_TYPE == "mistral":
+            tokenizer = AutoTokenizer.from_pretrained("mistralai/Mistral-7B-v0.1")
+        else:
+            tokenizer = AutoTokenizer.from_pretrained("gpt2")
+
+        logger.info("GGUF model loaded with llama-cpp-python")
+
+        # We'll use a custom pipeline approach for GGUF models
+        model = None
+        pipe = None
+
+    except ImportError:
+        logger.error("llama-cpp-python is required to load GGUF models. Please install it with 'pip install llama-cpp-python'")
+        raise ImportError("llama-cpp-python is required to load GGUF models")
 else:
     logger.info("Loading model with HuggingFace Transformers")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
     model = AutoModelForCausalLM.from_pretrained(
         MODEL_PATH,
-        device_map="auto" if USE_GPU else None,
-        torch_dtype=torch.float16 if USE_GPU else torch.float32,
+        device_map=device_map,
+        torch_dtype=torch_dtype,
+        low_cpu_mem_usage=True,
     )
+
+    # Create the pipeline with GPU support
     pipe = pipeline(
-        "text-generation", model=model, tokenizer=tokenizer, device=0 if USE_GPU else -1
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        device=0 if USE_GPU else -1,
+        torch_dtype=torch_dtype
     )
 
 logger.info("Model loaded successfully!")
@@ -136,26 +185,26 @@ async def create_completion(request: CompletionRequest):
     try:
         logger.info(f"Received completion request: {request.prompt[:50]}...")
 
-        if hasattr(model, "generate"):
-            # GGUF model approach
-            response = model(
+        if MODEL_PATH.endswith(".gguf"):
+            # Use llama-cpp-python for GGUF models
+            response = llm(
                 request.prompt,
                 max_tokens=request.max_tokens,
                 temperature=request.temperature,
                 top_p=request.top_p,
-                stop=request.stop,
-            )
+                stop=request.stop or [],
+            )["choices"][0]["text"]
         else:
-            # HuggingFace pipeline approach
+            # HuggingFace pipeline approach for other models
             generation = pipe(
                 request.prompt,
-                max_length=len(request.prompt.split()) + request.max_tokens,
+                max_new_tokens=request.max_tokens,
                 temperature=request.temperature,
                 top_p=request.top_p,
                 do_sample=True,
-                stopping_criteria=request.stop if request.stop else None,
+                return_full_text=False,
             )
-            response = generation[0]["generated_text"][len(request.prompt) :]
+            response = generation[0]["generated_text"]
 
         prompt_tokens = count_tokens(request.prompt)
         completion_tokens = count_tokens(response)
@@ -211,17 +260,17 @@ async def create_chat_completion(request: ChatCompletionRequest):
             formatted_prompt += "Assistant: "
 
         # Generate completion
-        if hasattr(model, "generate"):
-            # GGUF model approach
-            response = model(
+        if MODEL_PATH.endswith(".gguf"):
+            # Use llama-cpp-python for GGUF models
+            response = llm(
                 formatted_prompt,
                 max_tokens=request.max_tokens,
                 temperature=request.temperature,
                 top_p=request.top_p,
                 stop=request.stop or ["</s>", "User:", "System:"],
-            )
+            )["choices"][0]["text"]
         else:
-            # HuggingFace pipeline approach
+            # HuggingFace pipeline approach for other models
             generation = pipe(
                 formatted_prompt,
                 max_new_tokens=request.max_tokens,
@@ -229,7 +278,7 @@ async def create_chat_completion(request: ChatCompletionRequest):
                 top_p=request.top_p,
                 do_sample=True,
             )
-            response = generation[0]["generated_text"][len(formatted_prompt) :]
+            response = generation[0]["generated_text"][len(formatted_prompt):]
 
         # Strip any stop tokens
         if request.stop:

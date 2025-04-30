@@ -55,9 +55,9 @@ async def get_api_key(api_key: str = Security(api_key_header)):
 
 
 # Service URLs from environment variables
-LLM_ENGINE_URL = os.environ.get("LLM_ENGINE_URL", "http://llm-engine:8080")
-MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://mcp-server:5001")
-VECTOR_DB_URL = os.environ.get("VECTOR_DB_URL", "http://vector-db:8000")
+LLM_ENGINE_URL = os.environ.get("LLM_ENGINE_URL", "http://localhost:8080")
+MCP_SERVER_URL = os.environ.get("MCP_SERVER_URL", "http://localhost:5001")
+VECTOR_DB_URL = os.environ.get("VECTOR_DB_URL", "http://localhost:8000")
 
 
 # Define request and response models

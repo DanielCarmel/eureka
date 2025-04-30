@@ -3,7 +3,7 @@
 # Script to download LLM and embedding models for the Eureka system
 set -e
 
-MODELS_DIR="../models"
+MODELS_DIR="models"
 mkdir -p $MODELS_DIR
 
 echo "===================================="
@@ -41,7 +41,7 @@ read -p "Enter choice [1-4]: " llm_choice
 case $llm_choice in
     1)
         MODEL_NAME="llama-3-8b-instruct.Q4_K_M.gguf"
-        MODEL_URL="https://huggingface.co/TheBloke/Llama-3-8B-Instruct-GGUF/resolve/main/llama-3-8b-instruct.Q4_K_M.gguf"
+        MODEL_URL="https://huggingface.co/MaziyarPanahi/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf"
         ;;
     2)
         MODEL_NAME="mistral-7b-instruct-v0.2.Q4_K_M.gguf"

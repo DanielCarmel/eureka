@@ -22,23 +22,19 @@ dependencies = [
     "httpx==0.25.0",
     "requests==2.31.0",
     "python-multipart==0.0.6",
-
     # LLM Engine dependencies
-    "ctransformers==0.2.27",
     "openai==0.28.0",
     "transformers==4.34.0",
     "sentencepiece==0.1.99",
-    "torch>=2.1.0",  # Updated to a version compatible with Python 3.12
+    "torch>=2.1.0", # Updated to a version compatible with Python 3.12
     "peft==0.5.0",
     "accelerate==0.23.0",
     "bitsandbytes==0.41.1",
-
     # Vector DB dependencies
     "chromadb==0.4.15",
     "sentence-transformers==2.2.2",
-    "numpy>=1.26.0",  # Updated to a version compatible with Python 3.12
+    "numpy>=1.26.0", # Updated to a version compatible with Python 3.12
     "tqdm==4.66.1",
-
     # MCP Server dependencies
     "atlassian-python-api==3.41.1",
     "boto3==1.28.53",
@@ -47,10 +43,10 @@ dependencies = [
     "bs4==0.0.1",
     "PyPDF2==3.0.1",
     "python-docx==0.8.11",
-
     # RAG Orchestrator dependencies
     "jinja2==3.1.2",
-    "aiohttp>=3.9.0",  # Updated to a version compatible with Python 3.12
+    "aiohttp>=3.9.0", # Updated to a version compatible with Python 3.12
+    "llama-cpp-python>=0.3.8",
 ]
 
 [project.optional-dependencies]
@@ -107,8 +103,3 @@ select = [
 ignore = [
     "E203",  # whitespace before ':'
 ]
-
-[tool.uv]
-# Configure uv as the dependency manager
-python = {version = ">=3.8.1"}
-required-version = ">=0.1.0"

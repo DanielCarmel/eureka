@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional
 
@@ -35,24 +36,55 @@ app.add_middleware(
 )
 
 # Initialize ChromaDB
-CHROMA_DB_PATH = os.environ.get("CHROMA_DB_PATH", "/app/data")
+CHROMA_DB_PATH = os.environ.get("CHROMA_DB_PATH", "database/chromadb")
 EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "all-MiniLM-L6-v2")
+MODEL_CACHE_DIR = os.environ.get("MODEL_CACHE_DIR", "models/embeddings")
 
-# Ensure data directory exists
+# Ensure directories exist
 os.makedirs(CHROMA_DB_PATH, exist_ok=True)
+os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
 
 # Initialize ChromaDB client
 chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
 
-# Load sentence transformer model
-try:
-    logger.info(f"Loading embedding model: {EMBEDDING_MODEL}")
-    embedding_model = SentenceTransformer(EMBEDDING_MODEL)
-    logger.info("Embedding model loaded successfully")
-except Exception as e:
-    logger.error(f"Failed to load embedding model: {e}")
-    embedding_model = None
+# Try to load the sentence transformer model with offline support
+embedding_model = None
+def load_embedding_model():
+    global embedding_model
+    try:
+        logger.info(f"Loading embedding model: {EMBEDDING_MODEL}")
+        # First try to load from the local cache
+        try:
+            logger.info(f"Trying to load model from local cache: {MODEL_CACHE_DIR}")
+            embedding_model = SentenceTransformer(EMBEDDING_MODEL, cache_folder=MODEL_CACHE_DIR)
+            logger.info("Embedding model loaded successfully from cache")
+        except Exception as cache_error:
+            logger.warning(f"Could not load model from cache: {cache_error}")
+            
+            # Try downloading the model with a timeout
+            try:
+                import socket
+                # Set a shorter timeout for DNS resolution and connections
+                default_timeout = socket.getdefaulttimeout()
+                socket.setdefaulttimeout(10)  # 10 seconds timeout
+                
+                embedding_model = SentenceTransformer(EMBEDDING_MODEL, cache_folder=MODEL_CACHE_DIR)
+                logger.info("Embedding model downloaded and loaded successfully")
+                
+                # Restore default timeout
+                socket.setdefaulttimeout(default_timeout)
+            except Exception as download_error:
+                logger.error(f"Failed to download model: {download_error}")
+                raise download_error
+        
+        return True
+    except Exception as e:
+        logger.error(f"Failed to load embedding model: {e}")
+        return False
 
+# Try to load the model
+if not load_embedding_model():
+    logger.warning("Will try to run with disabled embedding features")
 
 # Define API models
 class Document(BaseModel):
@@ -91,7 +123,9 @@ def get_or_create_collection(name: str):
 def generate_embeddings(texts: List[str]) -> List[List[float]]:
     """Generate embeddings for a list of texts"""
     if not embedding_model:
-        raise Exception("Embedding model not initialized")
+        # If embedding model is not available, try to load it one more time
+        if not load_embedding_model():
+            raise Exception("Embedding model is not available. Please ensure network connectivity to huggingface.co or provide a local model.")
 
     embeddings = embedding_model.encode(texts)
     return embeddings.tolist()
@@ -230,14 +264,41 @@ async def health_check():
         chroma_client.list_collections()
 
         # Check if embedding model is loaded
+        status = {"status": "healthy", "components": {}}
+        
+        # Add ChromaDB status
+        status["components"]["chromadb"] = {
+            "status": "healthy",
+            "path": CHROMA_DB_PATH
+        }
+        
+        # Add embedding model status
         if not embedding_model:
-            return {"status": "unhealthy", "reason": "Embedding model not loaded"}
-
-        return {"status": "healthy"}
+            status["status"] = "degraded"
+            status["components"]["embedding_model"] = {
+                "status": "unavailable",
+                "reason": "Model not loaded",
+                "model": EMBEDDING_MODEL,
+                "cache_dir": MODEL_CACHE_DIR
+            }
+        else:
+            status["components"]["embedding_model"] = {
+                "status": "healthy",
+                "model": EMBEDDING_MODEL,
+                "cache_dir": MODEL_CACHE_DIR
+            }
+            
+        return status
 
     except Exception as e:
         logger.error(f"Health check failed: {e}")
-        return {"status": "unhealthy", "reason": str(e)}
+        return {
+            "status": "unhealthy", 
+            "reason": str(e),
+            "components": {
+                "chromadb": {"status": "error", "reason": str(e)}
+            }
+        }
 
 
 @app.post("/reset/{name}")

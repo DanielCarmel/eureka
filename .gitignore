@@ -178,3 +178,6 @@ models/
 
 # VSCode
 .vscode/
+
+# DB
+database/

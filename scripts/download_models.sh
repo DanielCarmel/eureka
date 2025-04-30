@@ -4,7 +4,9 @@
 set -e
 
 MODELS_DIR="models"
+EMBEDDINGS_DIR="$MODELS_DIR/embeddings"
 mkdir -p $MODELS_DIR
+mkdir -p $EMBEDDINGS_DIR
 
 echo "===================================="
 echo "Eureka RAG System Model Downloader"
@@ -68,19 +70,87 @@ if [ $llm_choice -ne 4 ]; then
     echo "LLM model downloaded successfully to $MODELS_DIR/$MODEL_NAME"
 fi
 
-# For embedding model, we'll use sentence-transformers which will be auto-downloaded
-# by the Python code, but we can inform the user
+# Embedding model download option
 echo ""
-echo "The embedding model (sentence-transformers) will be downloaded automatically"
-echo "when the Vector DB service starts for the first time."
+echo "Do you want to download the embedding model for offline use?"
+echo "1) Yes, download all-MiniLM-L6-v2 (80MB)"
+echo "2) Skip embedding model download"
 echo ""
+read -p "Enter choice [1-2]: " embedding_choice
+
+if [ "$embedding_choice" -eq 1 ]; then
+    # Create a temporary Python script to download the model
+    TEMP_SCRIPT=$(mktemp)
+    cat > $TEMP_SCRIPT << 'EOF'
+from sentence_transformers import SentenceTransformer
+import os
+import sys
+
+# Get the cache directory from arguments or use default
+cache_dir = sys.argv[1] if len(sys.argv) > 1 else "models/embeddings"
+model_name = "all-MiniLM-L6-v2"
+
+print(f"Downloading embedding model {model_name} to {cache_dir}...")
+try:
+    # This will download and cache the model
+    model = SentenceTransformer(model_name, cache_folder=cache_dir)
+    print(f"Successfully downloaded and cached model to {cache_dir}")
+except Exception as e:
+    print(f"Error downloading model: {e}")
+    sys.exit(1)
+EOF
+
+    # Check if Python and pip are installed
+    if command -v python3 > /dev/null; then
+        PYTHON_CMD="python3"
+    elif command -v python > /dev/null; then
+        PYTHON_CMD="python"
+    else
+        echo "Error: Python is not installed. Please install Python and try again."
+        rm $TEMP_SCRIPT
+        exit 1
+    fi
+    
+    # Install sentence-transformers if not installed
+    $PYTHON_CMD -c "import sentence_transformers" 2>/dev/null || {
+        echo "Installing sentence-transformers package..."
+        if command -v pip3 > /dev/null; then
+            pip3 install sentence-transformers
+        elif command -v pip > /dev/null; then
+            pip install sentence-transformers
+        else
+            echo "Error: pip is not available. Please install pip and try again."
+            rm $TEMP_SCRIPT
+            exit 1
+        fi
+    }
+    
+    # Run the script to download the model
+    $PYTHON_CMD $TEMP_SCRIPT "$EMBEDDINGS_DIR"
+    RM_STATUS=$?
+    
+    # Clean up
+    rm $TEMP_SCRIPT
+    
+    if [ $RM_STATUS -ne 0 ]; then
+        echo "Failed to download embedding model. Please check your internet connection."
+        exit 1
+    fi
+    
+    echo "Embedding model downloaded successfully to $EMBEDDINGS_DIR"
+else
+    echo "Skipping embedding model download."
+    echo "Note: The embedding model will be downloaded automatically when needed if internet is available."
+fi
 
 # Complete
+echo ""
 echo "===================================="
 echo "Model setup completed!"
 echo ""
 echo "You can now update your .env file with:"
 echo "LLM_MODEL_FILE=$MODEL_NAME"
+echo "MODEL_CACHE_DIR=$EMBEDDINGS_DIR"
 echo ""
 echo "Make sure to set all other required environment variables in the .env file."
 echo "===================================="

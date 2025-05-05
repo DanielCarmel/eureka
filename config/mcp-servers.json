@@ -1,0 +1,16 @@
+{
+  "s3": {
+    "command": "python",
+    "args": [
+      "mcp-servers/s3.py"
+    ],
+    "env": {}
+  },
+  "slack": {
+    "command": "python",
+    "args": [
+      "mcp-servers/slack.py"
+    ],
+    "env": {}
+  }
+}

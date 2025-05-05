@@ -1,156 +1,179 @@
 #!/bin/bash
 
-# Script to download LLM and embedding models for the Eureka system
-set -e
+# download_models.sh
+# Script to download GGUF model files for local LLM usage with llama.cpp
 
+set -e  # Exit on error
+
+# Default values
+DEFAULT_MODEL="llama-2-7b-chat"
+DEFAULT_QUANTIZATION="Q4_0"
 MODELS_DIR="models"
-EMBEDDINGS_DIR="$MODELS_DIR/embeddings"
-mkdir -p $MODELS_DIR
-mkdir -p $EMBEDDINGS_DIR
 
-echo "===================================="
-echo "Eureka RAG System Model Downloader"
-echo "===================================="
-echo ""
-echo "This script will download models required for the Eureka RAG system."
-echo "Models will be stored in the $MODELS_DIR directory."
-echo ""
+# Color formatting
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+NC='\033[0m' # No Color
 
-# Function to download with progress using wget or curl
-download_file() {
-    URL=$1
-    OUTPUT=$2
+# Print usage information
+usage() {
+    echo -e "${BLUE}Download GGUF Model Files${NC}"
+    echo "Usage: $0 [options]"
+    echo
+    echo "Options:"
+    echo "  -m, --model NAME       Model name to download (default: $DEFAULT_MODEL)"
+    echo "  -q, --quantization Q   Quantization level (default: $DEFAULT_QUANTIZATION)"
+    echo "  -d, --dir DIRECTORY    Download directory (default: $MODELS_DIR)"
+    echo "  -l, --list             List available models"
+    echo "  -h, --help             Show this help message"
+    echo
+    echo "Available models (use with -m):"
+    echo "  llama-2-7b-chat        Meta's Llama 2 7B chat model"
+    echo "  llama-2-13b-chat       Meta's Llama 2 13B chat model"
+    echo "  mistral-7b-instruct    Mistral 7B Instruct model"
+    echo "  mixtral-8x7b-instruct  Mixtral 8x7B Instruct model"
+    echo "  falcon-7b-instruct     Falcon 7B Instruct model"
+    echo
+    echo "Quantization options (use with -q):"
+    echo "  Q4_0    4-bit quantization, best compromise size/quality (default)"
+    echo "  Q5_K    5-bit quantization, higher quality but larger files"
+    echo "  Q8_0    8-bit quantization, highest quality but largest files"
+    echo "  Q2_K    2-bit quantization, smallest files but lower quality"
+    echo
+    echo "Example: $0 -m mistral-7b-instruct -q Q4_0 -d ./my_models"
+}
 
-    if command -v wget > /dev/null; then
-        wget --progress=bar:force -O "$OUTPUT" "$URL"
-    elif command -v curl > /dev/null; then
-        curl -L --progress-bar -o "$OUTPUT" "$URL"
+# List available models with descriptions
+list_models() {
+    echo -e "${BLUE}Available Models:${NC}"
+    echo -e "${GREEN}llama-2-7b-chat${NC} - Meta's Llama 2 7B chat model (4.1GB Q4_0)"
+    echo "  - Good for general chat and knowledge tasks"
+    echo "  - Source: https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF"
+    echo
+    echo -e "${GREEN}llama-2-13b-chat${NC} - Meta's Llama 2 13B chat model (7.3GB Q4_0)"
+    echo "  - Better reasoning than 7B version"
+    echo "  - Source: https://huggingface.co/TheBloke/Llama-2-13B-Chat-GGUF"
+    echo
+    echo -e "${GREEN}mistral-7b-instruct${NC} - Mistral 7B Instruct model (4.1GB Q4_0)"
+    echo "  - High performance model, often better than Llama 2 7B"
+    echo "  - Source: https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF"
+    echo
+    echo -e "${GREEN}mixtral-8x7b-instruct${NC} - Mixtral 8x7B Instruct model (12.9GB Q4_0)"
+    echo "  - Mixture of Experts model, high performance"
+    echo "  - Source: https://huggingface.co/TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF"
+    echo
+    echo -e "${GREEN}falcon-7b-instruct${NC} - Falcon 7B Instruct model (4.1GB Q4_0)"
+    echo "  - Open source alternative"
+    echo "  - Source: https://huggingface.co/TheBloke/falcon-7b-instruct-GGUF"
+    echo
+}
+
+# Download a model
+download_model() {
+    local model=$1
+    local quant=$2
+    local dir=$3
+    local url=""
+    local filename=""
+
+    # Ensure the download directory exists
+    mkdir -p "$dir"
+
+    # Define the URL based on the model name
+    case $model in
+        "llama-2-7b-chat")
+            url="https://huggingface.co/TheBloke/Llama-2-7B-Chat-GGUF/resolve/main/llama-2-7b-chat.$quant.gguf"
+            filename="llama-2-7b-chat.$quant.gguf"
+            ;;
+        "llama-2-13b-chat")
+            url="https://huggingface.co/TheBloke/Llama-2-13B-Chat-GGUF/resolve/main/llama-2-13b-chat.$quant.gguf"
+            filename="llama-2-13b-chat.$quant.gguf"
+            ;;
+        "mistral-7b-instruct")
+            url="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.$quant.gguf"
+            filename="mistral-7b-instruct-v0.2.$quant.gguf"
+            ;;
+        "mixtral-8x7b-instruct")
+            url="https://huggingface.co/TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF/resolve/main/mixtral-8x7b-instruct-v0.1.$quant.gguf"
+            filename="mixtral-8x7b-instruct-v0.1.$quant.gguf"
+            ;;
+        "falcon-7b-instruct")
+            url="https://huggingface.co/TheBloke/falcon-7b-instruct-GGUF/resolve/main/falcon-7b-instruct.$quant.gguf"
+            filename="falcon-7b-instruct.$quant.gguf"
+            ;;
+        *)
+            echo -e "${RED}Error: Unsupported model '$model'${NC}"
+            exit 1
+            ;;
+    esac
+
+    echo -e "${BLUE}Downloading model: ${GREEN}$model${NC} with ${GREEN}$quant${NC} quantization..."
+    echo -e "${YELLOW}This may take a while depending on your internet connection.${NC}"
+    echo -e "Downloading to: ${GREEN}$dir/$filename${NC}"
+
+    # Check if wget or curl is available
+    if command -v wget &> /dev/null; then
+        wget -c "$url" -O "$dir/$filename"
+    elif command -v curl &> /dev/null; then
+        curl -L "$url" -o "$dir/$filename" --progress-bar
     else
-        echo "Error: Neither wget nor curl is installed. Please install one of them and try again."
+        echo -e "${RED}Error: Neither wget nor curl is installed. Please install one of them and try again.${NC}"
+        exit 1
+    fi
+
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Download completed successfully!${NC}"
+        echo -e "You can use this model with: ${YELLOW}python main.py --provider llamacpp --model-path $dir/$filename${NC}"
+    else
+        echo -e "${RED}Download failed. Please check your internet connection and try again.${NC}"
         exit 1
     fi
 }
 
-# LLM Model Selection
-echo "Select an LLM model to download:"
-echo "1) Llama-3-8B-Instruct (Q4_K_M - 4.8GB)"
-echo "2) Mistral-7B-Instruct (Q4_K_M - 4.5GB)"
-echo "3) Phi-2 (Q4_K_M - 2.8GB)"
-echo "4) Skip LLM download (if you already have a model)"
-echo ""
-read -p "Enter choice [1-4]: " llm_choice
+# Parse command-line arguments
+MODEL=$DEFAULT_MODEL
+QUANTIZATION=$DEFAULT_QUANTIZATION
+DIR=$MODELS_DIR
 
-case $llm_choice in
-    1)
-        MODEL_NAME="llama-3-8b-instruct.Q4_K_M.gguf"
-        MODEL_URL="https://huggingface.co/MaziyarPanahi/Meta-Llama-3-8B-Instruct-GGUF/resolve/main/Meta-Llama-3-8B-Instruct.Q4_K_M.gguf"
-        ;;
-    2)
-        MODEL_NAME="mistral-7b-instruct-v0.2.Q4_K_M.gguf"
-        MODEL_URL="https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
-        ;;
-    3)
-        MODEL_NAME="phi-2.Q4_K_M.gguf"
-        MODEL_URL="https://huggingface.co/TheBloke/phi-2-GGUF/resolve/main/phi-2.Q4_K_M.gguf"
-        ;;
-    4)
-        echo "Skipping LLM model download."
-        ;;
-    *)
-        echo "Invalid choice. Exiting."
-        exit 1
-        ;;
-esac
-
-# Download LLM model if not skipped
-if [ $llm_choice -ne 4 ]; then
-    echo ""
-    echo "Downloading $MODEL_NAME..."
-    download_file "$MODEL_URL" "$MODELS_DIR/$MODEL_NAME"
-    echo "LLM model downloaded successfully to $MODELS_DIR/$MODEL_NAME"
-fi
-
-# Embedding model download option
-echo ""
-echo "Do you want to download the embedding model for offline use?"
-echo "1) Yes, download all-MiniLM-L6-v2 (80MB)"
-echo "2) Skip embedding model download"
-echo ""
-read -p "Enter choice [1-2]: " embedding_choice
-
-if [ "$embedding_choice" -eq 1 ]; then
-    # Create a temporary Python script to download the model
-    TEMP_SCRIPT=$(mktemp)
-    cat > $TEMP_SCRIPT << 'EOF'
-from sentence_transformers import SentenceTransformer
-import os
-import sys
-
-# Get the cache directory from arguments or use default
-cache_dir = sys.argv[1] if len(sys.argv) > 1 else "models/embeddings"
-model_name = "all-MiniLM-L6-v2"
-
-print(f"Downloading embedding model {model_name} to {cache_dir}...")
-try:
-    # This will download and cache the model
-    model = SentenceTransformer(model_name, cache_folder=cache_dir)
-    print(f"Successfully downloaded and cached model to {cache_dir}")
-except Exception as e:
-    print(f"Error downloading model: {e}")
-    sys.exit(1)
-EOF
-
-    # Check if Python and pip are installed
-    if command -v python3 > /dev/null; then
-        PYTHON_CMD="python3"
-    elif command -v python > /dev/null; then
-        PYTHON_CMD="python"
-    else
-        echo "Error: Python is not installed. Please install Python and try again."
-        rm $TEMP_SCRIPT
-        exit 1
-    fi
-    
-    # Install sentence-transformers if not installed
-    $PYTHON_CMD -c "import sentence_transformers" 2>/dev/null || {
-        echo "Installing sentence-transformers package..."
-        if command -v pip3 > /dev/null; then
-            pip3 install sentence-transformers
-        elif command -v pip > /dev/null; then
-            pip install sentence-transformers
-        else
-            echo "Error: pip is not available. Please install pip and try again."
-            rm $TEMP_SCRIPT
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -m|--model)
+            MODEL="$2"
+            shift
+            shift
+            ;;
+        -q|--quantization)
+            QUANTIZATION="$2"
+            shift
+            shift
+            ;;
+        -d|--dir)
+            DIR="$2"
+            shift
+            shift
+            ;;
+        -l|--list)
+            list_models
+            exit 0
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo -e "${RED}Error: Unknown option $1${NC}"
+            usage
             exit 1
-        fi
-    }
-    
-    # Run the script to download the model
-    $PYTHON_CMD $TEMP_SCRIPT "$EMBEDDINGS_DIR"
-    RM_STATUS=$?
-    
-    # Clean up
-    rm $TEMP_SCRIPT
-    
-    if [ $RM_STATUS -ne 0 ]; then
-        echo "Failed to download embedding model. Please check your internet connection."
-        exit 1
-    fi
-    
-    echo "Embedding model downloaded successfully to $EMBEDDINGS_DIR"
-else
-    echo "Skipping embedding model download."
-    echo "Note: The embedding model will be downloaded automatically when needed if internet is available."
-fi
+            ;;
+    esac
+done
 
-# Complete
-echo ""
-echo "===================================="
-echo "Model setup completed!"
-echo ""
-echo "You can now update your .env file with:"
-echo "LLM_MODEL_FILE=$MODEL_NAME"
-echo "MODEL_CACHE_DIR=$EMBEDDINGS_DIR"
-echo ""
-echo "Make sure to set all other required environment variables in the .env file."
-echo "===================================="
+# Execute the download
+download_model "$MODEL" "$QUANTIZATION" "$DIR"
+
+echo -e "${BLUE}===============================================${NC}"
+echo -e "${GREEN}Model downloaded and ready to use!${NC}"
+echo -e "${BLUE}===============================================${NC}"
+echo -e "Run with: ${YELLOW}python main.py --provider llamacpp --model-path $DIR/$(ls -t $DIR | head -1)${NC}"

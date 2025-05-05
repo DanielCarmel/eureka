@@ -1,331 +1,307 @@
 #!/usr/bin/env python3
+"""
+MCP Knowledge Base Client with LLM Integration
+
+This application connects to multiple MCP servers (S3, Slack)
+and provides a unified interface for knowledge base queries guided by an LLM.
+"""
+
 import argparse
+import asyncio
 import logging
 import os
 import sys
-from logging.handlers import RotatingFileHandler
+from typing import Any, Dict
 
-# Import utilities
-from utils.chunking import chunk_document
-from utils.confluence_ingest import ConfluenceIngestor
-from utils.jira_ingest import JiraIngestor
-from utils.s3_ingest import S3Ingestor
-from utils.test_utils import test_query
-from utils.vector_utils import VectorDBClient
+from helper_functions import (
+    create_default_config,
+    load_server_config,
+    save_results_to_file,
+)
+from rich.console import Console
+from rich.panel import Panel
+
+from llm.llm_client import LLMClient
+from orchestrator import MCPOrchestrator
 
 # Configure logging
-os.makedirs("logs", exist_ok=True)
 logging.basicConfig(
-    level=getattr(logging, os.environ.get("LOG_LEVEL", "INFO")),
+    level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    handlers=[
-        RotatingFileHandler("logs/cli.log", maxBytes=10485760, backupCount=5),
-        logging.StreamHandler(),
-    ],
+    handlers=[logging.StreamHandler(), logging.FileHandler("mcp-kb-client.log")],
 )
-logger = logging.getLogger("cli")
+logger = logging.getLogger(__name__)
 
-# Main parser
-parser = argparse.ArgumentParser(description="Eureka RAG System Management CLI")
-subparsers = parser.add_subparsers(dest="command", help="Command to execute")
+# Constants
+CONFIG_FILE = "config/servers.json"
+DEFAULT_TIMEOUT = 60.0  # seconds
 
-# Add Jira ingestion command
-jira_parser = subparsers.add_parser(
-    "ingest-jira", help="Ingest Jira issues into the vector database"
-)
-jira_parser.add_argument("--project", required=True, help="Jira project key")
-jira_parser.add_argument(
-    "--max-issues", type=int, default=100, help="Maximum number of issues to ingest"
-)
-jira_parser.add_argument(
-    "--collection", default="documents", help="Vector DB collection name"
-)
-jira_parser.add_argument(
-    "--chunk-size", type=int, default=512, help="Size of text chunks"
-)
-jira_parser.add_argument(
-    "--chunk-overlap", type=int, default=128, help="Overlap between chunks"
-)
-jira_parser.add_argument(
-    "--force", action="store_true", help="Force re-ingestion even if exists"
-)
-
-# Add Confluence ingestion command
-confluence_parser = subparsers.add_parser(
-    "ingest-confluence", help="Ingest Confluence spaces into the vector database"
-)
-confluence_parser.add_argument("--space", required=True, help="Confluence space key")
-confluence_parser.add_argument(
-    "--max-pages", type=int, default=100, help="Maximum number of pages to ingest"
-)
-confluence_parser.add_argument(
-    "--collection", default="documents", help="Vector DB collection name"
-)
-confluence_parser.add_argument(
-    "--chunk-size", type=int, default=512, help="Size of text chunks"
-)
-confluence_parser.add_argument(
-    "--chunk-overlap", type=int, default=128, help="Overlap between chunks"
-)
-confluence_parser.add_argument(
-    "--force", action="store_true", help="Force re-ingestion even if exists"
-)
-
-# Add S3 ingestion command
-s3_parser = subparsers.add_parser(
-    "ingest-s3", help="Ingest S3 documents into the vector database"
-)
-s3_parser.add_argument("--bucket", required=True, help="S3 bucket name")
-s3_parser.add_argument("--prefix", default="", help="S3 object prefix")
-s3_parser.add_argument(
-    "--collection", default="documents", help="Vector DB collection name"
-)
-s3_parser.add_argument(
-    "--chunk-size", type=int, default=512, help="Size of text chunks"
-)
-s3_parser.add_argument(
-    "--chunk-overlap", type=int, default=128, help="Overlap between chunks"
-)
-s3_parser.add_argument(
-    "--max-files", type=int, default=100, help="Maximum number of files to ingest"
-)
-s3_parser.add_argument(
-    "--force", action="store_true", help="Force re-ingestion even if exists"
-)
-
-# Add rebuild index command
-rebuild_parser = subparsers.add_parser(
-    "rebuild-index", help="Rebuild vector database collection"
-)
-rebuild_parser.add_argument(
-    "--collection", default="documents", help="Collection name to rebuild"
-)
-
-# Add test query command
-query_parser = subparsers.add_parser(
-    "test-query", help="Test a query against the RAG system"
-)
-query_parser.add_argument("question", help="Question to ask")
-query_parser.add_argument(
-    "--sources", nargs="+", help="Specific sources to query (jira, confluence, s3)"
-)
-query_parser.add_argument(
-    "--collection", default="documents", help="Vector DB collection to query"
-)
-query_parser.add_argument(
-    "--context-chunks", type=int, default=5, help="Number of context chunks to retrieve"
-)
+# Initialize Rich console for prettier output
+console = Console()
 
 
-def handle_ingest_jira(args):
-    """Handle Jira ingestion command"""
-    logger.info(f"Starting Jira ingestion for project {args.project}")
-    ingestor = JiraIngestor()
-    vector_db = VectorDBClient()
+async def connect_to_servers(
+    orchestrator: MCPOrchestrator, config: Dict[str, Dict[str, Any]]
+) -> bool:
+    """
+    Connect to all configured MCP servers.
 
-    try:
-        # Ingest issues
-        issues = ingestor.fetch_project_issues(args.project, args.max_issues)
-        logger.info(f"Fetched {len(issues)} issues from Jira project {args.project}")
+    Args:
+        orchestrator: The MCP orchestrator instance
+        config: Server configuration dictionary
 
-        # Process and add to vector store
-        success_count = 0
-        for issue in issues:
-            try:
-                # Chunk the issue content
-                chunks = chunk_document(
-                    text=issue["content"],
-                    metadata={
-                        "id": issue["id"],
-                        "title": issue["title"],
-                        "url": issue["url"],
-                        "source": "jira",
-                    },
-                    chunk_size=args.chunk_size,
-                    chunk_overlap=args.chunk_overlap,
-                )
+    Returns:
+        True if all servers connected successfully, False otherwise
+    """
+    success = True
 
-                # Add chunks to vector DB
-                vector_db.add_documents(args.collection, chunks)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"Failed to process issue {issue['id']}: {e}")
+    for server_name, server_config in config.items():
+        try:
+            command = server_config.get("command", "python")
+            args = server_config.get("args", [])
+            env = server_config.get("env", {})
 
-        logger.info(
-            f"Successfully ingested {success_count} out of {len(issues)} Jira issues"
+            await orchestrator.connect_to_server(server_name, command, args, env)
+        except Exception as e:
+            logger.error(f"Failed to connect to {server_name}: {str(e)}")
+            success = False
+
+    return success
+
+
+async def run_interactive_mode(orchestrator: MCPOrchestrator):
+    """
+    Run the client in interactive mode, prompting the user for queries.
+
+    Args:
+        orchestrator: The MCP orchestrator instance
+    """
+    console.print(
+        Panel.fit(
+            "[bold blue]MCP Knowledge Base Client with LLM Integration[/bold blue]\n\n"
+            "Type [bold green]'exit'[/bold green] or [bold green]'quit'[/bold green] to terminate\n"
+            "Type [bold green]'help'[/bold green] for available commands",
+            title="Interactive Mode",
         )
-
-    except Exception as e:
-        logger.error(f"Error during Jira ingestion: {e}")
-        sys.exit(1)
-
-
-def handle_ingest_confluence(args):
-    """Handle Confluence ingestion command"""
-    logger.info(f"Starting Confluence ingestion for space {args.space}")
-    ingestor = ConfluenceIngestor()
-    vector_db = VectorDBClient()
-
-    try:
-        # Ingest pages
-        pages = ingestor.fetch_space_pages(args.space, args.max_pages)
-        logger.info(f"Fetched {len(pages)} pages from Confluence space {args.space}")
-
-        # Process and add to vector store
-        success_count = 0
-        for page in pages:
-            try:
-                # Chunk the page content
-                chunks = chunk_document(
-                    text=page["content"],
-                    metadata={
-                        "id": page["id"],
-                        "title": page["title"],
-                        "url": page["url"],
-                        "space": page["space"],
-                        "source": "confluence",
-                    },
-                    chunk_size=args.chunk_size,
-                    chunk_overlap=args.chunk_overlap,
-                )
-
-                # Add chunks to vector DB
-                vector_db.add_documents(args.collection, chunks)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"Failed to process page {page['id']}: {e}")
-
-        logger.info(
-            f"Successfully ingested {success_count} out of {len(pages)} Confluence pages"
-        )
-
-    except Exception as e:
-        logger.error(f"Error during Confluence ingestion: {e}")
-        sys.exit(1)
-
-
-def handle_ingest_s3(args):
-    """Handle S3 ingestion command"""
-    logger.info(
-        f"Starting S3 ingestion for bucket {args.bucket} with prefix {args.prefix}"
     )
-    ingestor = S3Ingestor()
-    vector_db = VectorDBClient()
 
-    try:
-        # Ingest files
-        files = ingestor.fetch_s3_documents(args.bucket, args.prefix, args.max_files)
-        logger.info(f"Fetched {len(files)} files from S3 bucket {args.bucket}")
+    while True:
+        try:
+            command = console.input(
+                "\n[bold yellow]Enter query:[/bold yellow] "
+            ).strip()
 
-        # Process and add to vector store
-        success_count = 0
-        for file in files:
-            try:
-                # Chunk the file content
-                chunks = chunk_document(
-                    text=file["content"],
-                    metadata={
-                        "id": file["id"],
-                        "title": file["title"],
-                        "bucket": file["bucket"],
-                        "key": file["key"],
-                        "url": file["url"],
-                        "source": "s3",
-                    },
-                    chunk_size=args.chunk_size,
-                    chunk_overlap=args.chunk_overlap,
-                )
+            if command.lower() in ("exit", "quit"):
+                break
 
-                # Add chunks to vector DB
-                vector_db.add_documents(args.collection, chunks)
-                success_count += 1
-            except Exception as e:
-                logger.error(f"Failed to process file {file['id']}: {e}")
+            if command.lower() == "help":
+                print_help()
+                continue
 
-        logger.info(
-            f"Successfully ingested {success_count} out of {len(files)} S3 files"
+            if command.lower() == "servers":
+                console.print("\n[bold]Connected servers:[/bold]")
+                for server_name in orchestrator.sessions.keys():
+                    console.print(f"- {server_name}")
+                continue
+
+            if command.lower() == "reset":
+                orchestrator.llm_client.reset_conversation()
+                console.print("[green]Conversation history reset.[/green]")
+                continue
+
+            # Process the query using LLM-guided workflow
+            console.print(f"\n[bold]Processing query:[/bold] {command}")
+
+            with console.status("[bold green]Thinking...[/bold green]"):
+                response = await orchestrator.process_query(command)
+
+            # Display the response
+            console.print(Panel(response, title="Response", title_align="left"))
+
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Operation cancelled.[/yellow]")
+        except Exception as e:
+            console.print(f"[bold red]Error:[/bold red] {str(e)}")
+
+
+def print_help():
+    """Print available commands for interactive mode."""
+    console.print(
+        Panel.fit(
+            "help                      - Show this help message\n"
+            "servers                   - List connected servers\n"
+            "reset                     - Reset conversation history\n"
+            "exit, quit                - Exit the program",
+            title="Available Commands",
         )
-
-    except Exception as e:
-        logger.error(f"Error during S3 ingestion: {e}")
-        sys.exit(1)
+    )
 
 
-def handle_rebuild_index(args):
-    """Handle rebuild index command"""
-    logger.info(f"Rebuilding vector database collection: {args.collection}")
-    vector_db = VectorDBClient()
+async def main():
+    """Main entry point for the MCP Knowledge Base Client."""
+    parser = argparse.ArgumentParser(
+        description="MCP Knowledge Base Client with LLM Integration"
+    )
+    parser.add_argument(
+        "query", nargs="?", help="The search query (omit for interactive mode)"
+    )
+    parser.add_argument("--output", "-o", help="Save results to a file")
+    parser.add_argument(
+        "--config", "-c", default=CONFIG_FILE, help="Path to server configuration file"
+    )
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_TIMEOUT,
+        help="Timeout in seconds for server operations",
+    )
+    parser.add_argument("--debug", action="store_true", help="Enable debug logging")
 
-    try:
-        # Reset collection
-        success = vector_db.reset_collection(args.collection)
-        if success:
-            logger.info(f"Successfully reset collection {args.collection}")
-        else:
-            logger.error(f"Failed to reset collection {args.collection}")
-            sys.exit(1)
+    # LLM provider and model arguments
+    llm_group = parser.add_argument_group("LLM Options")
+    llm_group.add_argument(
+        "--provider",
+        default="ollama",
+        choices=["llamacpp", "ollama"],
+        help="LLM provider to use (default: ollama)",
+    )
+    llm_group.add_argument(
+        "--model",
+        default="llama2",
+        help="Model to use with the selected provider (default: llama2)",
+    )
+    llm_group.add_argument(
+        "--model-path", help="Path to model file (required for llamacpp provider)"
+    )
+    llm_group.add_argument(
+        "--api-base", help="Base URL for the API (for local/custom endpoints)"
+    )
+    llm_group.add_argument("--api-key", help="API key if needed by the provider")
+    llm_group.add_argument(
+        "--temperature",
+        type=float,
+        default=0.2,
+        help="Temperature for response generation (0.0-1.0, default: 0.2)",
+    )
+    llm_group.add_argument(
+        "--max-tokens",
+        type=int,
+        default=2048,
+        help="Maximum tokens to generate in responses (default: 2048)",
+    )
 
-    except Exception as e:
-        logger.error(f"Error during index rebuild: {e}")
-        sys.exit(1)
+    # Additional args for local models
+    local_group = parser.add_argument_group("Local Model Options")
+    local_group.add_argument(
+        "--n-ctx",
+        type=int,
+        default=4096,
+        help="Context window size for llama.cpp models (default: 4096)",
+    )
+    local_group.add_argument(
+        "--n-gpu-layers",
+        type=int,
+        default=-1,
+        help="Number of layers to offload to GPU for llama.cpp (-1 = all, default: -1)",
+    )
+    local_group.add_argument(
+        "--verbose", action="store_true", help="Enable verbose output for local models"
+    )
 
-
-def handle_test_query(args):
-    """Handle test query command"""
-    logger.info(f"Testing query: {args.question}")
-
-    try:
-        # Execute the query
-        response = test_query(
-            question=args.question,
-            sources=args.sources,
-            collection_name=args.collection,
-            max_context_chunks=args.context_chunks,
-        )
-
-        # Print the response
-        print("\n" + "=" * 80)
-        print(f"QUESTION: {response['question']}")
-        print("=" * 80)
-        print(f"ANSWER: {response['answer']}")
-        print("-" * 80)
-        print(f"Processing time: {response['processing_time']:.2f}s")
-
-        # Print context chunks if available
-        if "context_chunks" in response and response["context_chunks"]:
-            print("\nSOURCES:")
-            for i, chunk in enumerate(response["context_chunks"]):
-                print(f"\n{i + 1}. {chunk['title']} ({chunk['source_type']})")
-                if "url" in chunk and chunk["url"]:
-                    print(f"   URL: {chunk['url']}")
-
-        print("=" * 80)
-
-    except Exception as e:
-        logger.error(f"Error testing query: {e}")
-        sys.exit(1)
-
-
-def main():
-    """Main CLI entrypoint"""
-    # Parse arguments
     args = parser.parse_args()
 
-    # Execute the appropriate handler
-    if args.command == "ingest-jira":
-        handle_ingest_jira(args)
-    elif args.command == "ingest-confluence":
-        handle_ingest_confluence(args)
-    elif args.command == "ingest-s3":
-        handle_ingest_s3(args)
-    elif args.command == "rebuild-index":
-        handle_rebuild_index(args)
-    elif args.command == "test-query":
-        handle_test_query(args)
-    else:
-        parser.print_help()
-        sys.exit(1)
+    # Set debug logging if requested
+    if args.debug:
+        logging.getLogger().setLevel(logging.DEBUG)
+
+    # Create appropriate LLM client based on provider
+    try:
+        console.print(f"[bold]Initializing {args.provider} LLM client...[/bold]")
+
+        # Create LLM client with the specified provider
+        llm_client = await LLMClient.create(
+            provider=args.provider,
+            model=args.model,
+            model_path=args.model_path,
+            api_base=args.api_base,
+            api_key=args.api_key,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            n_ctx=args.n_ctx,
+            n_gpu_layers=args.n_gpu_layers,
+            verbose=args.verbose,
+        )
+
+        # Log successful initialization
+        console.print(
+            f"[green]Successfully initialized {args.provider} with model {args.model}[/green]"
+        )
+
+    except Exception as e:
+        console.print(f"[bold red]Error initializing LLM client:[/bold red] {str(e)}")
+        return 1
+
+    # Create orchestrator with LLM client
+    orchestrator = MCPOrchestrator(llm_client=llm_client)
+
+    try:
+        # Load or create configuration
+        if os.path.exists(args.config):
+            config = load_server_config(args.config)
+        else:
+            logger.info(
+                f"Configuration file not found. Creating default at {args.config}"
+            )
+            config = create_default_config(args.config)
+
+        # Connect to servers
+        console.print("[bold]Connecting to MCP servers...[/bold]")
+        success = await connect_to_servers(orchestrator, config)
+        if not success:
+            logger.warning(
+                "Some servers failed to connect. Continuing with available servers."
+            )
+
+        # Collect capabilities
+        await orchestrator.collect_capabilities()
+
+        if args.query:
+            # Run in command-line mode with a single query
+            console.print(f"[bold]Processing query:[/bold] {args.query}")
+
+            # Process the query using LLM-guided workflow
+            with console.status("[bold green]Thinking...[/bold green]"):
+                response = await asyncio.wait_for(
+                    orchestrator.process_query(args.query), args.timeout
+                )
+
+            # Display the response
+            console.print(Panel(response, title="Response", title_align="left"))
+
+            if args.output:
+                file_path = save_results_to_file(
+                    {"query": args.query, "response": response}, args.output
+                )
+                console.print(f"[green]Results saved to {file_path}[/green]")
+        else:
+            # Run in interactive mode
+            await run_interactive_mode(orchestrator)
+
+    except Exception as e:
+        logger.error(f"Error: {str(e)}")
+        return 1
+    finally:
+        # Disconnect from all servers
+        await orchestrator.disconnect_all()
+
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    # Run the async main function
+    try:
+        exit_code = asyncio.run(main())
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        console.print("\n[yellow]Operation cancelled by user.[/yellow]")
+        sys.exit(1)
